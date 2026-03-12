@@ -1,0 +1,25 @@
+records:
+  http:
+    server_ports: "8080"
+    number_of_redirections: 10
+    redirect_use_orig_cache_key: 1
+    cache:
+      http: 1
+      ignore_client_cc_max_age: 1
+      ignore_client_no_cache: 1 
+      ignore_server_no_cache: 1
+      cache_responses_to_cookies: 1
+  reverse_proxy.enabled: 1
+  ssl.client.CA.cert.filename: /etc/ssl/certs/ca-certificates.crt
+  diags:
+    debug.enabled: 0
+    output:
+      diag: "O"
+      status: "O"
+      note: "O"
+      warning: "O"
+      error: "E"
+      fatal: "E"
+      alert: "E"
+      emergency: "E"
+  log.logging_enabled: 3

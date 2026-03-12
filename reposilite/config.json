@@ -1,0 +1,53 @@
+{
+  "web": { "forwardedIp": "X-Forwarded-For" },
+  "frontend": {
+    "id": "reposilite-repository",
+    "title": "Reposilite Repository",
+    "description": "Public Maven repository hosted through the Reposilite",
+    "organizationWebsite": "https://reposilite.com",
+    "organizationLogo": "https://avatars.githubusercontent.com/u/88636591",
+    "privacyPolicy": "",
+    "icpLicense": ""
+  },
+  "authentication": {
+    "bruteForceProtection": {
+      "enabled": false,
+      "maxAttempts": 10,
+      "banDurationSeconds": 300
+    },
+    "ldap": {
+      "enabled": false,
+      "ssl": false,
+      "hostname": "ldap.domain.com",
+      "port": 389,
+      "baseDn": "dc=company,dc=com",
+      "searchUserDn": "cn=reposilite,ou=admins,dc=domain,dc=com",
+      "searchUserPassword": "reposilite-admin-secret",
+      "typeAttribute": "person",
+      "userAttribute": "cn",
+      "userFilter": "(&(objectClass=person)(ou=Maven Users))",
+      "userType": "PERSISTENT"
+    }
+  },
+  "statistics": { "enabled": true, "resolvedRequestsInterval": "MONTHLY" },
+  "maven": {
+    "repositories": [
+      {
+        "proxied": [
+          { "reference": "https://repo1.maven.org/maven2", "store": true }
+        ],
+        "id": "maven-central",
+        "visibility": "PUBLIC",
+        "storagePolicy": "PRIORITIZE_UPSTREAM_METADATA"
+      },
+      {
+        "id": "gradle-plugins",
+        "visibility": "PUBLIC",
+        "storagePolicy": "PRIORITIZE_UPSTREAM_METADATA",
+        "proxied": [
+          { "reference": "https://plugins.gradle.org/m2", "store": true }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,39 @@
+services:
+  caddy:
+    image: caddy:2.11.2-alpine
+    restart: unless-stopped
+    ports:
+      - "8443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./pki/root.crt:/data/caddy/pki/authorities/local/root.crt:ro
+      - ./pki/root.key:/data/caddy/pki/authorities/local/root.key:ro
+      - ./gradle-distributions:/srv/gradle-distributions:ro
+    depends_on:
+      - reposilite
+      - ats
+
+  reposilite:
+    image: dzikoysk/reposilite:3.5.28
+    restart: unless-stopped
+    environment:
+      - REPOSILITE_OPTS=--token admin:secret --channel=debug --shared-configuration=/app/config.json
+    volumes:
+      - ./reposilite/config.json:/app/config.json:ro
+      - reposilite_data:/app/data
+
+  ats:
+    image: trafficserver/trafficserver:10.1.0
+    #command: traffic_server --bind_stdout /dev/stdout --bind_stderr /dev/stderr
+    restart: unless-stopped
+    volumes:
+      - ./ats/records.yaml:/opt/etc/trafficserver/records.yaml:ro
+      - ./ats/remap.config:/opt/etc/trafficserver/remap.config:ro
+      - ./ats/logging.yaml:/opt/etc/trafficserver/logging.yaml:ro
+      - ./ats/storage.config:/opt/etc/trafficserver/storage.config:ro
+      - ./ats/cache.config:/opt/etc/trafficserver/cache.config:ro
+      - ats_cache:/opt/var/trafficserver
+
+volumes:
+  reposilite_data:
+  ats_cache:

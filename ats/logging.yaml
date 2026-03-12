@@ -1,0 +1,8 @@
+logging:
+  formats:
+    - name: common
+      format: '%<chi> - %<caun> [%<cqtn>] "%<cqhm> %<pqu> %<cqpv>" %<pssc> %<pscl>'
+  logs:
+    - filename: stdout
+      format: common
+      mode: ascii

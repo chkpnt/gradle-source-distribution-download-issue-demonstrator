@@ -1,0 +1,24 @@
+{
+    debug
+}
+
+maven-mirror.internal {
+    tls internal
+    reverse_proxy reposilite:8080
+    log
+}
+
+gradle-distributions.internal {
+    tls internal
+    handle /local/* {
+        uri strip_prefix /local
+        root * /srv/gradle-distributions
+        file_server browse
+    }
+    handle {
+        reverse_proxy ats:8080 {
+            header_up Host gradle-distributions.internal
+        }
+    }
+    log
+}
