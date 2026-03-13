@@ -33,19 +33,35 @@
   "maven": {
     "repositories": [
       {
-        "proxied": [
-          { "reference": "https://repo1.maven.org/maven2", "store": true }
-        ],
         "id": "maven-central",
         "visibility": "PUBLIC",
-        "storagePolicy": "PRIORITIZE_UPSTREAM_METADATA"
+        "storagePolicy": "STRICT",
+        "proxied": [
+          { "reference": "https://repo1.maven.org/maven2", "store": true }
+        ]
+      },
+      {
+        "id": "maven-central-snapshots",
+        "visibility": "PUBLIC",
+        "storagePolicy": "STRICT",
+        "proxied": [
+          { "reference": "https://central.sonatype.com/repository/maven-snapshots", "store": true }
+        ]
       },
       {
         "id": "gradle-plugins",
         "visibility": "PUBLIC",
-        "storagePolicy": "PRIORITIZE_UPSTREAM_METADATA",
+        "storagePolicy": "STRICT",
         "proxied": [
           { "reference": "https://plugins.gradle.org/m2", "store": true }
+        ]
+      },
+      {
+        "id": "gradle-libs",
+        "visibility": "PUBLIC",
+        "storagePolicy": "STRICT",
+        "proxied": [
+          { "reference": "https://repo.gradle.org/gradle/list/libs-releases", "store": true }
         ]
       }
     ]
