@@ -1,0 +1,565 @@
+/*
+ * Copyright 2022 the original author or authors.
+ * <p>
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ * <p>
+ * https://www.apache.org/licenses/LICENSE-2.0
+ * <p>
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.openrewrite.yaml;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.openrewrite.DocumentExample;
+import org.openrewrite.Issue;
+import org.openrewrite.test.RecipeSpec;
+import org.openrewrite.test.RewriteTest;
+
+import static org.openrewrite.yaml.Assertions.yaml;
+
+class DeletePropertyKeyTest implements RewriteTest {
+    @Override
+    public void defaults(RecipeSpec spec) {
+        spec.recipe(new DeleteProperty("management.metrics.binders.files.enabled", null, null, null));
+    }
+
+    @DocumentExample
+    @Test
+    void singleEntry() {
+        rewriteRun(
+          yaml("management.metrics.binders.files.enabled: true",
+            ""
+          )
+        );
+    }
+
+    @Issue("https://github.com/openrewrite/rewrite/issues/1841")
+    @Test
+    void firstItem() {
+        rewriteRun(
+          yaml(
+            """
+              management.metrics.binders.files.enabled: true
+              server.port: 8080
+              """,
+            """
+              server.port: 8080
+              """
+          )
+        );
+    }
+
+    @Test
+    void deleteSequenceItem() {
+        rewriteRun(
+          spec -> spec.recipe(new DeleteProperty("foo.bar.sequence.propertyA",
+            null, null, null)),
+          yaml(
+            """
+                foo:
+                  bar:
+                    sequence:
+                      - name: name
+                      - propertyA: fieldA
+                      - propertyB: fieldB
+                    scalar: value
+              """,
+            """
+                foo:
+                  bar:
+                    sequence:
+                      - name: name
+                      - propertyB: fieldB
+                    scalar: value
+              """
+          )
+        );
+    }
+
+    @Test
+    void deleteEntireSequence() {
+        rewriteRun(
+          spec -> spec.recipe(new DeleteProperty("foo.bar.sequence.propertyA",
+            null, null, null)),
+          yaml(
+            """
+              foo:
+                bar:
+                  sequence:
+                    - propertyA: fieldA
+                  # comments
+                  scalar: value
+              """,
+            """
+              foo:
+                bar:
+                  # comments
+                  scalar: value
+              """
+          )
+        );
+    }
+
+
+    @Test
+    void deleteFirstItemWithComments() {
+        rewriteRun(
+          spec -> spec.recipe(new DeleteProperty("foo.bar.sequence",
+            null, null, null)),
+          yaml(
+            """
+              foo:
+                bar:
+                  sequence:
+                    - name: name
+                    - propertyA: fieldA
+                    - propertyB: fieldB
+                  # Some comments
+                  scalar: value
+              """,
+            """
+              foo:
+                bar:
+                  # Some comments
+                  scalar: value
+              """
+          )
+        );
+    }
+
+    @Test
+    void lastItem() {
+        rewriteRun(
+          yaml(
+            """
+              server.port: 8080
+              management.metrics.binders.files.enabled: true
+              """,
+            """
+              server.port: 8080
+              """
+          )
+        );
+    }
+
+    @Test
+    void middleItem() {
+        rewriteRun(
+          yaml(
+            """
+              app.name: foo
+              management.metrics.binders.files.enabled: true
+              server.port: 8080
+              """,
+            """
+              app.name: foo
+              server.port: 8080
+              """
+          )
+        );
+    }
+
+    @Test
+    void downDeeper() {
+        rewriteRun(
+          yaml(
+            """
+              management.metrics:
+                enabled: true
+                binders.files.enabled: true
+              server.port: 8080
+              """,
+            """
+              management.metrics:
+                enabled: true
+              server.port: 8080
+              """
+          )
+        );
+    }
+
+    @Issue("https://github.com/openrewrite/rewrite/issues/2273")
+    @SuppressWarnings("YAMLUnusedAnchor")
+    @Test
+    void aliasAnchorPairs() {
+        rewriteRun(
+          spec -> spec.recipe(new DeleteProperty("bar.yo", null, null, null)),
+          yaml(
+            """
+              bar:
+                &abc yo: friend
+              baz:
+                *abc: friendly
+              """
+          )
+        );
+    }
+
+    @Issue("https://github.com/openrewrite/rewrite/issues/1168")
+    @ParameterizedTest
+    @ValueSource(strings = {
+      "acme.my-project.person.first-name",
+      "acme.myProject.person.firstName",
+      "acme.my_project.person.first_name"
+    })
+    void relaxedBinding(String propertyKey) {
+        rewriteRun(
+          spec -> spec.recipe(new DeleteProperty(propertyKey, false, true, null)),
+          yaml("acme.my-project.person.first-name: example",
+            ""
+          )
+        );
+    }
+
+    @Issue("https://github.com/openrewrite/rewrite/issues/1168")
+    @Test
+    void exactMatch() {
+        rewriteRun(
+          spec -> spec.recipe(new DeleteProperty("acme.my-project.person.first-name", false, false, null)),
+          yaml(
+            """
+              acme.myProject.person.firstName: example
+              acme.my_project.person.first_name: example
+              acme.my-project.person.first-name: example
+              """,
+            """
+              acme.myProject.person.firstName: example
+              acme.my_project.person.first_name: example
+              """
+          )
+        );
+    }
+
+    @Issue("https://github.com/openrewrite/rewrite/issues/1769")
+    @Test
+    void preservesOriginalIndentStructureOfExistingHierarchy() {
+        rewriteRun(
+          spec -> spec.recipe(new DeleteProperty("my.old.key", false, null, null)),
+          yaml(
+            """
+                my:
+                  old:
+                    key:
+                      color: blue
+                      style: retro
+                  other:
+                    key: qwe
+              """,
+            """
+                my:
+                  other:
+                    key: qwe
+              """
+          )
+        );
+    }
+
+    @Issue("https://github.com/openrewrite/rewrite/issues/4204")
+    @Test
+    void preserveEmptySequencesWithOtherKeys() {
+        rewriteRun(
+          spec -> spec.recipe(new DeleteProperty("my.key", false, null, null)),
+          yaml(
+            """
+              my.key: qwe
+              seq: []
+              """,
+            """
+              seq: []
+              """
+          )
+        );
+    }
+
+    @Test
+    void globPatternSingleWildcard() {
+        rewriteRun(
+          spec -> spec.recipe(new DeleteProperty("management.metrics.binders.*.enabled", null, null, null)),
+          yaml(
+            """
+              management.metrics.binders.files.enabled: true
+              management.metrics.binders.jvm.enabled: true
+              management.metrics.export.enabled: true
+              """,
+            """
+              management.metrics.export.enabled: true
+              """
+          )
+        );
+    }
+
+    @Test
+    void globPatternSingleWildcardAtEnd() {
+        rewriteRun(
+          spec -> spec.recipe(new DeleteProperty("management.metrics.binders.files.*", null, null, null)),
+          yaml(
+            """
+              management:
+                metrics:
+                  binders:
+                    files:
+                      enabled: true
+                      disabled: false
+              xyz.export.enabled: true
+              """,
+            """
+              xyz.export.enabled: true
+              """
+          )
+        );
+    }
+
+    @Test
+    void globPatternDoubleWildcard() {
+        rewriteRun(
+          spec -> spec.recipe(new DeleteProperty("management.**.enabled", null, null, null)),
+          yaml(
+            """
+              management.metrics.binders.files.enabled: true
+              management.metrics.enabled: true
+              management.health.enabled: false
+              server.port: 8080
+              """,
+            """
+              server.port: 8080
+              """
+          )
+        );
+    }
+
+    @Test
+    void globPatternNestedYaml() {
+        rewriteRun(
+          spec -> spec.recipe(new DeleteProperty("spring.datasource.*.password", null, null, null)),
+          yaml(
+            """
+              spring:
+                datasource:
+                  primary:
+                    url: jdbc:mysql://localhost/db1
+                    password: secret1
+                  secondary:
+                    url: jdbc:mysql://localhost/db2
+                    password: secret2
+              """,
+            """
+              spring:
+                datasource:
+                  primary:
+                    url: jdbc:mysql://localhost/db1
+                  secondary:
+                    url: jdbc:mysql://localhost/db2
+              """
+          )
+        );
+    }
+
+    @Test
+    void globPatternWithRelaxedBinding() {
+        rewriteRun(
+          spec -> spec.recipe(new DeleteProperty("acme.my-project.*.first-name", null, true, null)),
+          yaml(
+            """
+              acme:
+                my-project:
+                  person:
+                    first-name: John
+                    last-name: Doe
+                  employee:
+                    firstName: Jane
+                    lastName: Smith
+              """,
+            """
+              acme:
+                my-project:
+                  person:
+                    last-name: Doe
+                  employee:
+                    lastName: Smith
+              """
+          )
+        );
+    }
+
+    @Test
+    void globPatternWithExactMatch() {
+        rewriteRun(
+          spec -> spec.recipe(new DeleteProperty("acme.*.first-name", null, false, null)),
+          yaml(
+            """
+              acme:
+                person:
+                  first-name: John
+                  firstName: Jane
+              """,
+            """
+              acme:
+                person:
+                  firstName: Jane
+              """
+          )
+        );
+    }
+
+    @Test
+    void globPatternWithFoldedBlockScalarDeleteLeading() {
+        rewriteRun(
+          spec -> spec.recipe(new DeleteProperty("acme.my-project.*.first-name", null, null, null)),
+          yaml(
+            """
+              acme:
+                my-project:
+                  person:
+                    first-name: John
+                    last-name: >-
+                      Doe
+                  employee:
+                    firstName: Jane
+                    lastName: Smith
+              """,
+            """
+              acme:
+                my-project:
+                  person:
+                    last-name: >-
+                      Doe
+                  employee:
+                    lastName: Smith
+              """
+          )
+        );
+    }
+
+    @Test
+    void globPatternWithFoldedBlockScalarDeleteLeadingScalar() {
+        rewriteRun(
+          spec -> spec.recipe(new DeleteProperty("acme.my-project.*.first-name", null, null, null)),
+          yaml(
+            """
+              acme:
+                my-project:
+                  person:
+                    first-name: >-
+                      John
+                    last-name: Doe
+                  employee:
+                    firstName: Jane
+                    lastName: Smith
+              """,
+            """
+              acme:
+                my-project:
+                  person:
+                    last-name: Doe
+                  employee:
+                    lastName: Smith
+              """
+          )
+        );
+    }
+
+    @Test
+    void globPatternWithFoldedBlockScalarDeleteTrailing() {
+        rewriteRun(
+          spec -> spec.recipe(new DeleteProperty("acme.my-project.*.last-name", null, null, null)),
+          yaml(
+            """
+              acme:
+                my-project:
+                  person:
+                    first-name: John
+                    last-name: >-
+                      Doe
+                  employee:
+                    firstName: Jane
+                    lastName: Smith
+              """,
+            """
+              acme:
+                my-project:
+                  person:
+                    first-name: John
+                  employee:
+                    firstName: Jane
+              """
+          )
+        );
+    }
+
+    @Test
+    void globPatternWithFoldedBlockScalarInSequence() {
+        rewriteRun(
+          spec -> spec.recipe(new DeleteProperty("acme.items.last-name", null, null, null)),
+          yaml(
+            """
+              acme:
+                items:
+                  - first-name: John
+                    last-name: >-
+                      Doe
+                  - first-name: Jane
+                    last-name: Smith
+              """,
+            """
+              acme:
+                items:
+                  - first-name: John
+                  - first-name: Jane
+              """
+          )
+        );
+    }
+
+    @Test
+    void globPatternWithFoldedBlockScalarHigherParent() {
+        rewriteRun(
+          spec -> spec.recipe(new DeleteProperty("acme.my-project.*.last-name", null, null, null)),
+          yaml(
+            """
+              acme:
+                my-project:
+                  person:
+                    first-name: John
+                    last-name: >-
+                      Doe
+                other:
+                  key: value
+              """,
+            """
+              acme:
+                my-project:
+                  person:
+                    first-name: John
+                other:
+                  key: value
+              """
+          )
+        );
+    }
+
+    @Test
+    void deleteLastEntryPreservesInlineCommentOnPreviousEntry() {
+        rewriteRun(
+          spec -> spec.recipe(new DeleteProperty("root.delete-me", null, null, null)),
+          yaml(
+            """
+              root:
+                keep: yes # inline comment
+                delete-me: val
+              """,
+            """
+              root:
+                keep: yes # inline comment
+              """
+          )
+        );
+    }
+}

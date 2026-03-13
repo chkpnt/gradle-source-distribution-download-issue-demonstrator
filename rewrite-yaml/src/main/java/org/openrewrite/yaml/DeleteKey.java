@@ -1,0 +1,103 @@
+/*
+ * Copyright 2021 the original author or authors.
+ * <p>
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ * <p>
+ * https://www.apache.org/licenses/LICENSE-2.0
+ * <p>
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.openrewrite.yaml;
+
+import lombok.EqualsAndHashCode;
+import lombok.Value;
+import org.jspecify.annotations.Nullable;
+import org.openrewrite.*;
+import org.openrewrite.internal.ListUtils;
+import org.openrewrite.yaml.tree.Yaml;
+
+import java.util.concurrent.atomic.AtomicReference;
+
+@Value
+@EqualsAndHashCode(callSuper = false)
+public class DeleteKey extends Recipe {
+    @Option(displayName = "Key path",
+            description = "A [JsonPath](https://docs.openrewrite.org/reference/jsonpath-and-jsonpathmatcher-reference) expression to locate a YAML entry.",
+            example = "$.source.kind")
+    String keyPath;
+
+
+    @Option(displayName = "File pattern",
+            description = "A glob expression representing a file path to search for (relative to the project root). Blank/null matches all.",
+            required = false,
+            example = ".github/workflows/*.yml")
+    @Nullable
+    String filePattern;
+
+    String displayName = "Delete key";
+
+    String description = "Delete a YAML mapping entry key.";
+
+    @Override
+    public Validated<Object> validate() {
+        return super.validate().and(JsonPathMatcher.validate("keyPath", keyPath));
+    }
+
+    @Override
+    public TreeVisitor<?, ExecutionContext> getVisitor() {
+        JsonPathMatcher matcher = new JsonPathMatcher(keyPath);
+        return Preconditions.check(new FindSourceFiles(filePattern), new YamlIsoVisitor<ExecutionContext>() {
+
+            @Override
+            public Yaml.Sequence visitSequence(Yaml.Sequence sequence, ExecutionContext ctx) {
+                Yaml.Sequence s = super.visitSequence(sequence, ctx);
+                AtomicReference<@Nullable String> copyFirstPrefix = new AtomicReference<>();
+                s = s.withEntries(ListUtils.map(s.getEntries(), (i, e) -> {
+                    if (matcher.matches(new Cursor(getCursor(), e)) || matcher.matches(new Cursor(getCursor(), e.getBlock()))) {
+                        if (i == 0) {
+                            copyFirstPrefix.set(e.getPrefix());
+                        }
+                        removeUnused(getCursor());
+                        return null;
+                    }
+                    return e;
+                }));
+
+                if (!s.getEntries().isEmpty() && copyFirstPrefix.get() != null) {
+                    //noinspection DataFlowIssue
+                    s = s.withEntries(ListUtils.mapFirst(s.getEntries(), e -> e.withPrefix(copyFirstPrefix.get())));
+                }
+
+                return s;
+            }
+
+            @Override
+            public Yaml.Mapping visitMapping(Yaml.Mapping mapping, ExecutionContext ctx) {
+                Yaml.Mapping m = super.visitMapping(mapping, ctx);
+                AtomicReference<String> copyFirstPrefix = new AtomicReference<>();
+                m = m.withEntries(ListUtils.map(m.getEntries(), (i, e) -> {
+                    if (matcher.matches(new Cursor(getCursor(), e))) {
+                        if (i == 0 && getCursor().getParentOrThrow().getValue() instanceof Yaml.Sequence.Entry) {
+                            copyFirstPrefix.set(e.getPrefix());
+                        }
+                        removeUnused(getCursor().getParent());
+                        return null;
+                    }
+                    return e;
+                }));
+
+                if (!m.getEntries().isEmpty() && copyFirstPrefix.get() != null) {
+                    m = m.withEntries(ListUtils.mapFirst(m.getEntries(), e -> e.withPrefix(copyFirstPrefix.get())));
+                }
+
+                return m;
+            }
+        });
+    }
+}

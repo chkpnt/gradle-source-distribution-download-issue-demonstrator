@@ -1,0 +1,38 @@
+plugins {
+    id("org.openrewrite.build.language-library")
+}
+
+val antlrGeneration by configurations.creating {
+    extendsFrom(configurations.implementation.get())
+}
+tasks.register<JavaExec>("generateAntlrSources") {
+    mainClass.set("org.antlr.v4.Tool")
+
+    args = listOf(
+            "-o", "src/main/java/org/openrewrite/hcl/internal/grammar",
+            "-package", "org.openrewrite.hcl.internal.grammar",
+            "-visitor"
+    ) + fileTree("src/main/antlr").matching { include("**/*.g4") }.map { it.path }
+
+    classpath = antlrGeneration
+
+    finalizedBy("licenseFormat")
+}
+
+dependencies {
+    api(project(":rewrite-core"))
+    api("org.jetbrains:annotations:latest.release")
+    api("com.fasterxml.jackson.core:jackson-annotations")
+
+    compileOnly(project(":rewrite-test"))
+
+    implementation("org.antlr:antlr4-runtime:4.13.2")
+    implementation("io.micrometer:micrometer-core:1.9.+")
+
+    antlrGeneration("org.antlr:antlr4:4.13.2"){
+        exclude(group = "com.ibm.icu", module = "icu4j")
+    }
+
+    testImplementation(project(":rewrite-test"))
+    testImplementation("org.junit-pioneer:junit-pioneer:2.0.0")
+}

@@ -1,0 +1,431 @@
+/*
+ * Copyright 2020 the original author or authors.
+ * <p>
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ * <p>
+ * https://www.apache.org/licenses/LICENSE-2.0
+ * <p>
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.openrewrite.java.internal.template;
+
+import io.micrometer.core.instrument.Metrics;
+import io.micrometer.core.instrument.Timer;
+import lombok.RequiredArgsConstructor;
+import org.jspecify.annotations.Nullable;
+import org.openrewrite.Cursor;
+import org.openrewrite.Tree;
+import org.openrewrite.internal.ListUtils;
+import org.openrewrite.java.JavaIsoVisitor;
+import org.openrewrite.java.service.AnnotationService;
+import org.openrewrite.java.tree.*;
+
+import java.util.ArrayList;
+import java.util.IdentityHashMap;
+import java.util.List;
+import java.util.Set;
+
+import static java.util.Collections.emptyList;
+import static java.util.Collections.newSetFromMap;
+
+@RequiredArgsConstructor
+public class AnnotationTemplateGenerator {
+    private static final String TEMPLATE_COMMENT = "__TEMPLATE_cfcc2025-6662__";
+
+    private final Set<String> imports;
+
+    public String cacheKey(Cursor cursor, String template) {
+        StringBuilder after = new StringBuilder();
+
+        J j = cursor.getValue();
+        if (j instanceof J.MethodDeclaration) {
+            after.insert(0, " void $method() {}");
+        } else if (j instanceof J.VariableDeclarations) {
+            after.insert(0, " int $variable;");
+        } else if (j instanceof J.ClassDeclaration) {
+            addDummyClass(cursor, after);
+        }
+
+        if (cursor.getParentOrThrow().getValue() instanceof J.ClassDeclaration &&
+                cursor.getParentOrThrow().getParentOrThrow().getValue() instanceof JavaSourceFile) {
+            after.append("class $Template {}");
+        }
+
+        return "/*" + TEMPLATE_COMMENT + "*/" + template + "\n" + after;
+    }
+
+    public String template(Cursor cursor, String template) {
+        //noinspection ConstantConditions
+        return Timer.builder("rewrite.template.generate.statement")
+                .register(Metrics.globalRegistry)
+                .record(() -> {
+                    StringBuilder before = new StringBuilder();
+                    StringBuilder after = new StringBuilder();
+
+                    template(next(cursor), cursor.getValue(), before, after, newSetFromMap(new IdentityHashMap<>()));
+
+                    J j = cursor.getValue();
+                    J annotationParent = j instanceof J.Annotation && cursor.getParent() != null ? cursor.getParent().firstEnclosing(J.class) : null;
+
+                    int level = 1;
+                    while (annotationParent instanceof J.NewArray || annotationParent instanceof J.Assignment || annotationParent instanceof J.Annotation) {
+                        level += 1;
+                        if (cursor.getParent(level) == null) {
+                            break;
+                        }
+                        annotationParent = cursor.getParent(level).firstEnclosing(J.class);
+                    }
+
+                    if (j instanceof J.MethodDeclaration || annotationParent instanceof J.MethodDeclaration) {
+                        after.insert(0, " void $method() {}");
+                    } else if (j instanceof J.VariableDeclarations || annotationParent instanceof J.VariableDeclarations) {
+                        after.insert(0, " int $variable;");
+                    } else if (j instanceof J.ClassDeclaration || annotationParent instanceof J.ClassDeclaration) {
+                        // Check if this is a top-level class or nested class
+                        Cursor classCursor = j instanceof J.ClassDeclaration ? cursor : cursor.getParent(level);
+                        if (classCursor != null) {
+                            addDummyClass(classCursor, after);
+                        }
+                    }
+                    return before + "/*" + TEMPLATE_COMMENT + "*/" + template + "\n" + after;
+                });
+    }
+
+    protected void addDummyClass(Cursor cursor, StringBuilder after) {
+        if (cursor.getParentOrThrow().getValue() instanceof JavaSourceFile) {
+            after.insert(0, "class $Clazz {}");
+        } else {
+            after.insert(0, "static class $Clazz {}");
+        }
+    }
+
+    protected void addDummyAnnotationType(StringBuilder after) {
+        after.append("\n@interface $Placeholder {}");
+    }
+
+    public List<J.Annotation> listAnnotations(JavaSourceFile cu) {
+        List<J.Annotation> annotations = new ArrayList<>();
+
+        new JavaIsoVisitor<Integer>() {
+
+            private @Nullable Comment filterTemplateComment(Comment comment) {
+                return comment instanceof TextComment && ((TextComment) comment).getText().equals(TEMPLATE_COMMENT) ?
+                        null : comment;
+            }
+
+            @Override
+            public J.Annotation visitAnnotation(J.Annotation annotation, Integer integer) {
+                List<Comment> combinedComments = ListUtils.concatAll(
+                        getCursor().getParentOrThrow().<J>getValue().getComments(),
+                        annotation.getComments());
+                List<Comment> filteredComments = ListUtils.map(combinedComments, this::filterTemplateComment);
+                if (combinedComments != filteredComments) {
+                    annotations.add(annotation.withComments(filteredComments));
+                }
+                return annotation;
+            }
+        }.visit(cu, 0);
+
+        return annotations;
+    }
+
+    private void template(Cursor cursor, J prior, StringBuilder before, StringBuilder after, Set<J> templated) {
+        templated.add(cursor.getValue());
+        final J j = cursor.getValue();
+        if (j instanceof JavaSourceFile) {
+            JavaSourceFile cu = (JavaSourceFile) j;
+            for (J.Import anImport : cu.getImports()) {
+                before.insert(0, anImport.withPrefix(Space.EMPTY).printTrimmed(cursor) + ";\n");
+            }
+            for (String anImport : imports) {
+                before.insert(0, anImport);
+            }
+
+            if (cu.getPackageDeclaration() != null) {
+                before.insert(0, cu.getPackageDeclaration().withPrefix(Space.EMPTY).printTrimmed(cursor) + ";\n");
+            }
+            List<J.ClassDeclaration> classes = cu.getClasses();
+            if (!"$Placeholder".equals(classes.get(classes.size() - 1).getName().getSimpleName())) {
+                addDummyAnnotationType(after);
+            }
+            return;
+        } else if (j instanceof J.ClassDeclaration) {
+            classDeclaration(before, after, (J.ClassDeclaration) j, templated, cursor, prior);
+        } else if (j instanceof J.Block) {
+            J parent = next(cursor).getValue();
+            if (parent instanceof J.MethodDeclaration) {
+                J.MethodDeclaration m = (J.MethodDeclaration) parent;
+
+                // variable declarations up to the point of insertion
+                assert m.getBody() != null;
+                for (Statement statement : m.getBody().getStatements()) {
+                    if (statement == prior) {
+                        break;
+                    } else if (statement instanceof J.VariableDeclarations) {
+                        before.insert(0, "\n" +
+                                variable((J.VariableDeclarations) statement, cursor) +
+                                ";\n");
+                    }
+                }
+
+                if (m.getReturnTypeExpression() != null && JavaType.Primitive.Void != m.getReturnTypeExpression().getType()) {
+                    after.append("return ")
+                            .append(valueOfType(m.getReturnTypeExpression().getType()))
+                            .append(";\n");
+                }
+
+                before.insert(0, m.withBody(null)
+                        .withLeadingAnnotations(emptyList())
+                        .withPrefix(Space.EMPTY)
+                        .printTrimmed(cursor).trim() + '{');
+                after.append('}');
+            } else if (parent instanceof J.NewClass) {
+                // Anonymous class body
+                J.NewClass nc = (J.NewClass) parent;
+                anonymousClassDeclaration(before, after, nc, cursor, prior);
+            } else if (parent instanceof J.Block) {
+                J.Block b = (J.Block) j;
+
+                // variable declarations up to the point of insertion
+                for (Statement statement : b.getStatements()) {
+                    if (statement == prior) {
+                        break;
+                    } else if (statement instanceof J.VariableDeclarations) {
+                        J.VariableDeclarations v = (J.VariableDeclarations) statement;
+                        if (v.hasModifier(J.Modifier.Type.Final)) {
+                            before.insert(0, "\n" + variable(v, cursor) + ";\n");
+                        }
+                    }
+                }
+
+                before.insert(0, "{\n");
+                if (b.isStatic()) {
+                    before.insert(0, "static");
+                }
+                after.append('}');
+            }
+        } else if (j instanceof J.NewClass) {
+            final J.NewClass n = (J.NewClass) j;
+            if (n.getBody() != null && referToSameElement(n.getBody(), prior)) {
+                // prior is the body of this anonymous class - already handled by J.Block case
+                // Check if this J.NewClass is an argument to another constructor - if so, don't add semicolon
+                // The parent will handle closing the statement
+                J parent = next(cursor).getValue();
+                if (!(parent instanceof J.NewClass) ||
+                        ((J.NewClass) parent).getArguments().stream().noneMatch(arg -> referToSameElement(arg, n))) {
+                    // Only add semicolon if this is not an argument to another NewClass
+                    after.append(";");
+                }
+            } else if (n.getArguments().stream().anyMatch(arg -> referToSameElement(arg, prior))) {
+                // prior is one of the arguments - wrap in argument list
+                String newClassString;
+                JavaType.Class constructorTypeClass = n.getConstructorType() != null ? TypeUtils.asClass(n.getConstructorType().getReturnType()) : null;
+                if (n.getClazz() != null) {
+                    newClassString = "new " + n.getClazz().printTrimmed(cursor);
+                } else if (constructorTypeClass != null) {
+                    newClassString = "new " + constructorTypeClass.getFullyQualifiedName();
+                } else {
+                    throw new IllegalStateException("Unable to template a J.NewClass instance having a null clazz and constructor type.");
+                }
+
+                // Build stub arguments before and after the prior
+                StringBuilder beforeArgs = new StringBuilder(newClassString + "(");
+                StringBuilder afterArgs = new StringBuilder();
+                List<Expression> arguments = n.getArguments();
+                boolean priorFound = false;
+                for (int i = 0; i < arguments.size(); i++) {
+                    Expression arg = arguments.get(i);
+                    if (!priorFound) {
+                        if (referToSameElement(arg, prior)) {
+                            priorFound = true;
+                            continue;
+                        }
+                        if (i > 0) {
+                            beforeArgs.append(", ");
+                        }
+                        beforeArgs.append(valueOfType(arg.getType()));
+                    } else {
+                        afterArgs.append(", ").append(valueOfType(arg.getType()));
+                    }
+                }
+                afterArgs.append(")");
+
+                before.insert(0, beforeArgs);
+                after.append(afterArgs);
+                after.append(";");
+            } else {
+                J.NewClass stripped = n.withBody(null).withPrefix(Space.EMPTY);
+                before.insert(0, '{');
+                before.insert(0, stripped.printTrimmed(cursor.getParentOrThrow()).trim());
+                after.append("};");
+            }
+        } else if (j instanceof J.VariableDeclarations && prior instanceof J.VariableDeclarations.NamedVariable) {
+            J.VariableDeclarations v = (J.VariableDeclarations) j;
+            StringBuilder varPrefix = new StringBuilder();
+            for (J.Modifier modifier : v.getModifiers()) {
+                varPrefix.append(modifier.getType().toString().toLowerCase()).append(' ');
+            }
+            if (v.getTypeExpression() != null) {
+                varPrefix.append(v.getTypeExpression().withPrefix(Space.EMPTY).printTrimmed(cursor)).append(' ');
+            }
+            varPrefix.append(((J.VariableDeclarations.NamedVariable) prior).getSimpleName()).append(" = ");
+            before.insert(0, varPrefix);
+        }
+
+        template(next(cursor), j, before, after, templated);
+    }
+
+    private void classDeclaration(StringBuilder before, StringBuilder after, J.ClassDeclaration parent, Set<J> templated, Cursor cursor, J prior) {
+        J.ClassDeclaration c = parent;
+        boolean annotated = isAnnotated(cursor, prior);
+        if (!annotated) {
+            for (Statement statement : c.getBody().getStatements()) {
+                if (templated.contains(statement)) {
+                    continue;
+                }
+
+                if (statement instanceof J.VariableDeclarations) {
+                    J.VariableDeclarations v = (J.VariableDeclarations) statement;
+                    if (v.hasModifier(J.Modifier.Type.Final) && v.hasModifier(J.Modifier.Type.Static)) {
+                        before.insert(0, variable((J.VariableDeclarations) statement, cursor) + ";\n");
+                    }
+                } else if (statement instanceof J.ClassDeclaration) {
+                    // this is a sibling class. we need declarations for all variables and methods.
+                    // setting prior to null will cause them all to be written.
+                    before.insert(0, '}');
+                    classDeclaration(before, after, (J.ClassDeclaration) statement, templated, cursor, prior);
+                }
+            }
+        }
+        c = c.withBody(J.Block.createEmptyBlock())
+                .withLeadingAnnotations(emptyList())
+                .withPrefix(Space.EMPTY)
+                .withKind(J.ClassDeclaration.Kind.Type.Class)
+                .withPrimaryConstructor(null);
+        String printed = c.printTrimmed(cursor);
+        int braceIndex = printed.lastIndexOf('{');
+        if (annotated) {
+            after.append(braceIndex == -1 ? printed + '{' : printed.substring(0, braceIndex + 1));
+        } else {
+            before.insert(0, braceIndex == -1 ? printed + '{' : printed.substring(0, braceIndex + 1));
+        }
+        after.append('}');
+    }
+
+    private void anonymousClassDeclaration(StringBuilder before, StringBuilder after, J.NewClass nc, Cursor cursor, J prior) {
+        // Generate the anonymous class instantiation stub
+        String newClassString;
+        JavaType.Class constructorTypeClass = nc.getConstructorType() != null ? TypeUtils.asClass(nc.getConstructorType().getReturnType()) : null;
+        if (nc.getClazz() != null) {
+            newClassString = "new " + nc.getClazz().printTrimmed(cursor);
+        } else if (constructorTypeClass != null) {
+            newClassString = "new " + constructorTypeClass.getFullyQualifiedName();
+        } else {
+            throw new IllegalStateException("Unable to template inside a J.NewClass instance having a null clazz and constructor type.");
+        }
+
+        // Build stub arguments to make it parseable
+        StringBuilder stubArgs = new StringBuilder("(");
+        List<Expression> arguments = nc.getArguments();
+        boolean firstArg = true;
+        for (Expression arg : arguments) {
+            if (arg instanceof J.Empty) {
+                continue;
+            }
+            if (!firstArg) {
+                stubArgs.append(", ");
+            }
+            firstArg = false;
+            stubArgs.append(valueOfType(arg.getType()));
+        }
+        stubArgs.append(")");
+
+        before.insert(0, newClassString + stubArgs + '{');
+
+        J.Block body = nc.getBody();
+        if (body != null) {
+            for (Statement statement : body.getStatements()) {
+                if (referToSameElement(statement, prior)) {
+                    break;
+                } else if (statement instanceof J.VariableDeclarations) {
+                    J.VariableDeclarations v = (J.VariableDeclarations) statement;
+                    before.insert(0, variable(v, cursor) + ";\n");
+                }
+            }
+        }
+        after.append('}');
+    }
+
+    private static boolean referToSameElement(@Nullable Tree t1, @Nullable Tree t2) {
+        return t1 == t2 || (t1 != null && t2 != null && t1.getId().equals(t2.getId()));
+    }
+
+    private static boolean isAnnotated(Cursor cursor, J maybeAnnotation) {
+        if (!(maybeAnnotation instanceof J.Annotation)) {
+            return false;
+        }
+        Cursor sourceFileCursor = cursor.dropParentUntil(is -> is instanceof JavaSourceFile);
+        AnnotationService annotationService = sourceFileCursor.<JavaSourceFile>getValue().service(AnnotationService.class);
+        return annotationService.getAllAnnotations(cursor).contains(maybeAnnotation);
+    }
+
+    private String variable(J.VariableDeclarations variable, Cursor cursor) {
+        StringBuilder varBuilder = new StringBuilder();
+        if (variable.getTypeExpression() != null) {
+            for (J.Modifier modifier : variable.getModifiers()) {
+                varBuilder.append(modifier.getType().toString().toLowerCase()).append(' ');
+            }
+            varBuilder.append(variable.getTypeExpression().withPrefix(Space.EMPTY).printTrimmed(cursor))
+                    .append(' ');
+        }
+
+        List<J.VariableDeclarations.NamedVariable> variables = variable.getVariables();
+        for (int i = 0, variablesSize = variables.size(); i < variablesSize; i++) {
+            J.VariableDeclarations.NamedVariable nv = variables.get(i);
+            varBuilder.append(nv.getSimpleName());
+
+            if (i < variables.size() - 1) {
+                varBuilder.append(',');
+            }
+        }
+
+        return varBuilder.toString();
+    }
+
+    private String valueOfType(@Nullable JavaType type) {
+        JavaType.Primitive primitive = TypeUtils.asPrimitive(type);
+        if (primitive != null) {
+            switch (primitive) {
+                case Boolean:
+                    return "true";
+                case Byte:
+                case Char:
+                case Int:
+                case Double:
+                case Float:
+                case Long:
+                case Short:
+                    return "0";
+                case String:
+                case Null:
+                    return "null";
+                case None:
+                case Void:
+                default:
+                    return "";
+            }
+        }
+
+        return "null";
+    }
+
+    private Cursor next(Cursor c) {
+        return c.getParentTreeCursor();
+    }
+}
