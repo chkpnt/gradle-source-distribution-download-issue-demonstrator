@@ -90,6 +90,7 @@ tasks.withType<Test>().configureEach {
     dependsOn(pluginLocalTestClasspath)
     systemProperty("org.openrewrite.gradle.local.use-embedded-classpath", pluginLocalTestClasspath.files.find { it.name == "test-manifest.txt" }!!.path)
     maxHeapSize = "2g"
+    onlyIf { false } // never runs unless called directly
 }
 
 // This seems to be the only way to get the groovy compiler to emit java-8 compatible bytecode

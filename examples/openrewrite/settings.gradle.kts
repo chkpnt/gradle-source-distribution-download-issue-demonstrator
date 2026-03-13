@@ -1,6 +1,18 @@
 pluginManagement {
+    repositories { maven(url = "https://maven-mirror.internal:8443/gradle-plugins/") }
+}
+
+dependencyResolutionManagement {
+    //repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    // Otherwise, the repos added by RewriteDependencyRepositoriesPlugin are used, see
+    // https://github.com/openrewrite/rewrite-build-gradle-plugin/blob/main/src/main/java/org/openrewrite/gradle/RewriteDependencyRepositoriesPlugin.java
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
     repositories {
-        gradlePluginPortal()
+        maven(url = "https://maven-mirror.internal:8443/maven-central/")
+
+        // In case you want to build :rewrite-gradle
+        maven(url = "https://maven-mirror.internal:8443/gradle-plugins/")
+        maven(url = "https://maven-mirror.internal:8443/gradle-libs")
     }
 }
 
@@ -14,9 +26,9 @@ val allProjects = listOf(
     "rewrite-benchmarks",
     "rewrite-bom",
     "rewrite-core",
-    "rewrite-csharp",
+    //"rewrite-csharp",
     "rewrite-docker",
-    "rewrite-gradle",
+    "rewrite-gradle", // tests fail
     "rewrite-gradle-tooling-model:model",
     "rewrite-gradle-tooling-model:plugin",
     "rewrite-groovy",

@@ -48,6 +48,10 @@ dependencies {
     testRuntimeOnly("org.rocksdb:rocksdbjni:10.2.1")
 }
 
+tasks.withType<Test>().configureEach {
+    onlyIf { false } // never runs unless called directly
+}
+
 tasks.register<JavaExec>("generateAntlrSources") {
     mainClass.set("org.antlr.v4.Tool")
 

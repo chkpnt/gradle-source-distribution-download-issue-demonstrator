@@ -3,6 +3,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
     id("org.openrewrite.build.language-library")
     kotlin("jvm") version "2.2.21"
+    id("demo.hello-world")
 }
 
 val kotlinVersion = "2.2.0"

@@ -15,9 +15,11 @@
  */
 initscript {
     repositories {
-        mavenLocal()
-        maven { url = uri("https://central.sonatype.com/repository/maven-snapshots") }
-        mavenCentral()
+        // mavenLocal()
+        // maven { url = uri("https://central.sonatype.com/repository/maven-snapshots") }
+        // mavenCentral()
+        maven { url = uri("https://maven-mirror.internal:8443/maven-central/") }
+        maven { url = uri("https://maven-mirror.internal:8443/maven-central-snapshots/") }
     }
 
     configurations.all {
