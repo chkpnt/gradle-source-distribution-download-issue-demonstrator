@@ -2,6 +2,8 @@ This repository demonstrates the issues around `SourceDistributionProvider` in G
 and provides a local mirror infrastructure to reproduce them in a simulated
 network-restricted environment.
 
+In order to clone this repository, [`git-lfs`](https://git-lfs.com/) needs to be installed due to the files in [gradle-distributions](gradle-distributions).
+
 # Background
 
 - [#27863](https://github.com/gradle/gradle/issues/27863): SourceDistributionProvider contains hardcoded distributionUrl referring to https://services.gradle.org
