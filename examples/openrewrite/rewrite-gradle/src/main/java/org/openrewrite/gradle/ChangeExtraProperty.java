@@ -1,0 +1,56 @@
+/*
+ * Copyright 2023 the original author or authors.
+ * <p>
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ * <p>
+ * https://www.apache.org/licenses/LICENSE-2.0
+ * <p>
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.openrewrite.gradle;
+
+import lombok.EqualsAndHashCode;
+import lombok.Value;
+import org.openrewrite.*;
+import org.openrewrite.gradle.search.FindGradleProject;
+import org.openrewrite.gradle.trait.ExtraProperty;
+
+
+@Value
+@EqualsAndHashCode(callSuper = false)
+public class ChangeExtraProperty extends Recipe {
+
+    String displayName = "Change Extra Property";
+
+    String description = "Gradle's [ExtraPropertiesExtension](https://docs.gradle.org/current/dsl/org.gradle.api.plugins.ExtraPropertiesExtension.html) " +
+            "is a commonly used mechanism for setting arbitrary key/value pairs on a project. " +
+            "This recipe will change the value of a property with the given key name if that key can be found. " +
+            "It assumes that the value being set is a String literal. " +
+            "Does not add the value if it does not already exist.";
+
+    @Option(displayName = "Key",
+            description = "The key of the property to change.",
+            example = "foo")
+    String key;
+
+    @Option(displayName = "Value",
+            description = "The new value to set. The value will be treated the contents of a string literal.",
+            example = "bar")
+    String value;
+
+    @Override
+    public TreeVisitor<?, ExecutionContext> getVisitor() {
+        return Preconditions.check(
+                new FindGradleProject(FindGradleProject.SearchCriteria.File).getVisitor(),
+                new ExtraProperty.Matcher()
+                        .propertyName(key)
+                        .asVisitor((prop, ctx) -> prop.withValue(value).getTree())
+        );
+    }
+}

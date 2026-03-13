@@ -1,0 +1,138 @@
+/*
+ * Copyright 2020 the original author or authors.
+ * <p>
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ * <p>
+ * https://www.apache.org/licenses/LICENSE-2.0
+ * <p>
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.openrewrite.java.style;
+
+import com.fasterxml.jackson.annotation.JsonCreator;
+import org.openrewrite.style.LineWrapSetting;
+import org.openrewrite.style.NamedStyles;
+import org.openrewrite.style.Style;
+
+import java.util.Arrays;
+import java.util.Collection;
+
+import static java.util.Collections.emptyList;
+import static java.util.Collections.emptySet;
+import static org.openrewrite.Tree.randomId;
+
+public class IntelliJ extends NamedStyles {
+    private static final IntelliJ INSTANCE = new IntelliJ();
+
+    // Public so that Environment can find and activate this style
+    // From code, should use IntelliJ.default() instead
+    public IntelliJ() {
+        super(randomId(),
+                "org.openrewrite.java.IntelliJ",
+                "IntelliJ IDEA",
+                "IntelliJ IDEA defaults for styles.",
+                emptySet(),
+                Arrays.asList(
+                        importLayout(),
+                        blankLines(),
+                        tabsAndIndents(),
+                        spaces(),
+                        wrappingAndBraces()
+                )
+        );
+    }
+
+    @JsonCreator
+    public static IntelliJ defaults() {
+        return INSTANCE;
+    }
+
+    @Override
+    public Collection<Style> getStyles() {
+        return super.getStyles();
+    }
+
+    public static ImportLayoutStyle importLayout() {
+        return ImportLayoutStyle.builder()
+                .importAllOthers()
+                .blankLine()
+                .importPackage("javax.*")
+                .importPackage("java.*")
+                .blankLine()
+                .importStaticAllOthers()
+                .build();
+    }
+
+    public static TabsAndIndentsStyle tabsAndIndents() {
+        return new TabsAndIndentsStyle(false, 4, 4, 8, false);
+    }
+
+    public static BlankLinesStyle blankLines() {
+        return new BlankLinesStyle(
+                new BlankLinesStyle.KeepMaximum(2, 2, 2, 2),
+                new BlankLinesStyle.Minimum(0, 1, 3, 1, 1, 0, 0,
+                        0, 0, 0, 1, 1, 0, 1)
+        );
+    }
+
+    public static SpacesStyle spaces() {
+        return new SpacesStyle(
+                new SpacesStyle.BeforeParentheses(false, false, true, true, true, true, true, true, true, false),
+                new SpacesStyle.AroundOperators(true, true, true, true, true, true, true, true, false, true, false),
+                new SpacesStyle.BeforeLeftBrace(true, true, true, true, true, true, true, true, true, true, true, true, false, false),
+                new SpacesStyle.BeforeKeywords(true, true, true, true),
+                new SpacesStyle.Within(false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false),
+                new SpacesStyle.TernaryOperator(true, true, true, true),
+                new SpacesStyle.TypeArguments(true, false, false),
+                new SpacesStyle.Other(false, true, false, true, true, true, false, true),
+                new SpacesStyle.TypeParameters(false, true)
+        );
+    }
+
+    public static WrappingAndBracesStyle wrappingAndBraces() {
+        return new WrappingAndBracesStyle(
+                120,
+                new WrappingAndBracesStyle.KeepWhenFormatting(true, true, true, false, false, false, false, false),
+                new WrappingAndBracesStyle.ExtendsImplementsPermitsList(LineWrapSetting.DoNotWrap, false),
+                new WrappingAndBracesStyle.ExtendsImplementsPermitsKeyword(LineWrapSetting.DoNotWrap),
+                new WrappingAndBracesStyle.ThrowsList(LineWrapSetting.DoNotWrap, false, false),
+                new WrappingAndBracesStyle.ThrowsKeyword(LineWrapSetting.DoNotWrap),
+                new WrappingAndBracesStyle.MethodDeclarationParameters(LineWrapSetting.DoNotWrap, true, false, false),
+                new WrappingAndBracesStyle.MethodCallArguments(LineWrapSetting.DoNotWrap, false, false, false, false),
+                new WrappingAndBracesStyle.MethodParentheses(false, false),
+                new WrappingAndBracesStyle.ChainedMethodCalls(LineWrapSetting.DoNotWrap, false, false, emptyList(), false, false),
+                new WrappingAndBracesStyle.IfStatement(WrappingAndBracesStyle.ForceBraces.DoNotForce, false, true),
+                new WrappingAndBracesStyle.ForStatement(LineWrapSetting.DoNotWrap, true, false, false, WrappingAndBracesStyle.ForceBraces.DoNotForce),
+                new WrappingAndBracesStyle.WhileStatement(WrappingAndBracesStyle.ForceBraces.DoNotForce),
+                new WrappingAndBracesStyle.DoWhileStatement(WrappingAndBracesStyle.ForceBraces.DoNotForce, false),
+                new WrappingAndBracesStyle.SwitchStatement(LineWrapSetting.DoNotWrap, true, true), // should be WrapIfTooLong
+                new WrappingAndBracesStyle.TryWithResources(LineWrapSetting.DoNotWrap, true, false, false),
+                new WrappingAndBracesStyle.TryStatement(false, false, LineWrapSetting.DoNotWrap, true), // should be WrapIfTooLong
+                new WrappingAndBracesStyle.BinaryExpressions(LineWrapSetting.DoNotWrap, false, false, false, false, false),
+                new WrappingAndBracesStyle.AssignmentStatement(LineWrapSetting.DoNotWrap, false),
+                new WrappingAndBracesStyle.GroupDeclarations(false, false, false, false),
+                new WrappingAndBracesStyle.TernaryOperation(LineWrapSetting.DoNotWrap, false, false),
+                new WrappingAndBracesStyle.ArrayInitializer(LineWrapSetting.DoNotWrap, false, false, false),
+                new WrappingAndBracesStyle.ModifierList(false),
+                new WrappingAndBracesStyle.AssertStatement(LineWrapSetting.DoNotWrap, false, false),
+                new WrappingAndBracesStyle.EnumConstants(LineWrapSetting.DoNotWrap),
+                new WrappingAndBracesStyle.Annotations(LineWrapSetting.WrapAlways),
+                new WrappingAndBracesStyle.Annotations(LineWrapSetting.WrapAlways),
+                new WrappingAndBracesStyle.FieldAnnotations(LineWrapSetting.WrapAlways, false),
+                new WrappingAndBracesStyle.ParameterAnnotations(LineWrapSetting.DoNotWrap, false),
+                new WrappingAndBracesStyle.Annotations(LineWrapSetting.DoNotWrap),
+                new WrappingAndBracesStyle.Annotations(LineWrapSetting.DoNotWrap),
+                new WrappingAndBracesStyle.AnnotationParameters(LineWrapSetting.DoNotWrap, false, false, false),
+                new WrappingAndBracesStyle.TextBlocks(false),
+                new WrappingAndBracesStyle.RecordComponents(LineWrapSetting.DoNotWrap, true, false, false, false), // should be WrapIfTooLong
+                new WrappingAndBracesStyle.DeconstructionPatterns(LineWrapSetting.DoNotWrap, true, true, true) // should be WrapIfTooLong
+        );
+    }
+
+}

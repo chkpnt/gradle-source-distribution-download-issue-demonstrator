@@ -1,0 +1,188 @@
+/*
+ * Copyright 2023 the original author or authors.
+ * <p>
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ * <p>
+ * https://www.apache.org/licenses/LICENSE-2.0
+ * <p>
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.openrewrite.internal;
+
+import lombok.RequiredArgsConstructor;
+import org.jspecify.annotations.Nullable;
+import org.openrewrite.*;
+import org.openrewrite.marker.DeserializationError;
+import org.openrewrite.marker.Generated;
+import org.openrewrite.marker.RecipesThatMadeChanges;
+
+import java.nio.file.Path;
+import java.util.*;
+import java.util.function.UnaryOperator;
+
+import static java.util.Collections.emptyList;
+import static java.util.Collections.singleton;
+
+public class InMemoryLargeSourceSet implements LargeSourceSet {
+    /**
+     * If null, then the initial state is this instance.
+     */
+    @Nullable
+    private final InMemoryLargeSourceSet initialState;
+
+    private final List<SourceFile> ls;
+
+    @Nullable
+    private Map<SourceFile, List<Recipe>> deletions;
+
+    private List<Recipe> currentRecipeStack;
+
+    @Nullable
+    private ClassLoader recipeClassLoader;
+
+    public InMemoryLargeSourceSet(List<SourceFile> ls) {
+        this(null, null, ls, null);
+    }
+
+    public InMemoryLargeSourceSet(List<SourceFile> ls, @Nullable ClassLoader classLoader) {
+        this(null, null, ls, classLoader);
+    }
+
+    protected InMemoryLargeSourceSet(@Nullable InMemoryLargeSourceSet initialState,
+                                     @Nullable Map<SourceFile, List<Recipe>> deletions,
+                                     List<SourceFile> ls,
+                                     @Nullable ClassLoader classLoader) {
+        this.initialState = initialState;
+        this.ls = ls;
+        this.deletions = deletions;
+        this.recipeClassLoader = classLoader;
+    }
+
+    protected InMemoryLargeSourceSet withChanges(@Nullable Map<SourceFile, List<Recipe>> deletions, List<SourceFile> mapped) {
+        return new InMemoryLargeSourceSet(getInitialState(), deletions, mapped, recipeClassLoader);
+    }
+
+    @Override
+    public void setRecipe(List<Recipe> recipeStack) {
+        this.currentRecipeStack = recipeStack;
+    }
+
+    @Override
+    public LargeSourceSet edit(UnaryOperator<SourceFile> map) {
+        ClassLoader originalTCCL = null;
+        try {
+            if (recipeClassLoader != null) {
+                // set TCCL to the recipe's classloader and store the original value, needed by SPI to load providers from recipe artifacts
+                originalTCCL = Thread.currentThread().getContextClassLoader();
+                Thread.currentThread().setContextClassLoader(recipeClassLoader);
+            }
+            List<SourceFile> mapped = ListUtils.map(ls, before -> {
+                SourceFile after = map.apply(before);
+                if (after == null) {
+                    if (deletions == null) {
+                        deletions = new LinkedHashMap<>();
+                    }
+                    deletions.put(before, currentRecipeStack);
+                }
+                return after;
+            });
+            return mapped != ls ? withChanges(deletions, mapped) : this;
+        } finally {
+            if (originalTCCL != null) {
+                // reset TCCL value to the original one to no infer with other tooling
+                Thread.currentThread().setContextClassLoader(originalTCCL);
+            }
+        }
+
+    }
+
+    @Override
+    public LargeSourceSet generate(@Nullable Collection<? extends SourceFile> t) {
+        if (t == null || t.isEmpty()) {
+            //noinspection ConstantConditions
+            return this;
+        } else if (ls.isEmpty()) {
+            //noinspection unchecked
+            return withChanges(deletions, (List<SourceFile>) t);
+        }
+
+        List<SourceFile> newLs = new ArrayList<>(ls);
+        newLs.addAll(t);
+        return withChanges(deletions, newLs);
+    }
+
+    protected InMemoryLargeSourceSet getInitialState() {
+        return initialState == null ? this : initialState;
+    }
+
+    @Override
+    public Changeset getChangeset() {
+        Map<UUID, SourceFile> sourceFileIdentities = new HashMap<>();
+        for (SourceFile sourceFile : getInitialState().ls) {
+            sourceFileIdentities.put(sourceFile.getId(), sourceFile);
+        }
+
+        List<Result> changes = new ArrayList<>();
+
+        // added or changed files
+        for (SourceFile s : ls) {
+            SourceFile original = sourceFileIdentities.get(s.getId());
+            if (original != s) {
+                if (original != null) {
+                    if (original.getMarkers().findFirst(Generated.class).isPresent() || s.getMarkers().findFirst(DeserializationError.class).isPresent()) {
+                        continue;
+                    }
+                    changes.add(new Result(original, s));
+                } else {
+                    Collection<List<Recipe>> recipes = s.getMarkers().findFirst(RecipesThatMadeChanges.class).map(RecipesThatMadeChanges::getRecipes).orElse(emptyList());
+                    changes.add(new Result(null, s, recipes));
+                }
+            }
+        }
+
+        if (deletions != null) {
+            for (Map.Entry<SourceFile, List<Recipe>> entry : deletions.entrySet()) {
+                changes.add(new Result(entry.getKey(), null, singleton(entry.getValue())));
+            }
+        }
+
+        return new InMemoryChangeset(changes);
+    }
+
+    @Override
+    public @Nullable SourceFile getBefore(Path sourcePath) {
+        List<SourceFile> sourceFiles = getInitialState().ls;
+        for (SourceFile s : sourceFiles) {
+            if (s.getSourcePath().equals(sourcePath)) {
+                return s;
+            }
+        }
+        return null;
+    }
+
+    @RequiredArgsConstructor
+    private static class InMemoryChangeset implements Changeset {
+        final List<Result> change;
+
+        @Override
+        public int size() {
+            return change.size();
+        }
+
+        @Override
+        public List<Result> getPage(int start, int count) {
+            return change.subList(start, Math.min(change.size(), start + count));
+        }
+
+        @Override
+        public List<Result> getAllResults() {
+            return change;
+        }
+    }
+}

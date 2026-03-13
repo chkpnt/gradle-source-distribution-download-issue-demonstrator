@@ -1,0 +1,153 @@
+/*
+ * Copyright 2022 the original author or authors.
+ * <p>
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ * <p>
+ * https://www.apache.org/licenses/LICENSE-2.0
+ * <p>
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.openrewrite;
+
+import lombok.EqualsAndHashCode;
+import lombok.Value;
+import org.jspecify.annotations.Nullable;
+import org.openrewrite.marker.BuildMetadata;
+import org.openrewrite.marker.DeserializationError;
+import org.openrewrite.marker.Markup;
+import org.openrewrite.table.ParseFailures;
+
+import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.util.Objects;
+
+@Value
+@EqualsAndHashCode(callSuper = false)
+public class FindParseFailures extends Recipe {
+
+    @Option(displayName = "Max snippet length",
+            description = "When the failure occurs on a granular tree element, its source code will be included " +
+                          "as a column in the data table up to this maximum snippet length.",
+            required = false)
+    @Nullable
+    Integer maxSnippetLength;
+
+    @Option(displayName = "Parser type",
+            description = "Only display failures from parsers with this simple name.",
+            required = false,
+            example = "YamlParser")
+    @Nullable
+    String parserType;
+
+    @Option(example = "RuntimeException", displayName = "Stack trace",
+            description = "Only mark stack traces with a message containing this text.",
+            required = false)
+    @Nullable
+    String stackTrace;
+
+    @Option(displayName = "Created after",
+            description = "Only report on source files that were created after this date.",
+            example = "2025-01-01",
+            required = false)
+    @Nullable
+    String createdAfter;
+
+    transient ParseFailures failures = new ParseFailures(this);
+
+    String displayName = "Find source files with `ParseExceptionResult` markers";
+
+    String description = "This recipe explores parse failures after an LST is produced for classifying the types of " +
+               "failures that can occur and prioritizing fixes according to the most common problems.";
+
+    @Override
+    public Validated<Object> validate() {
+        return super.validate().and(Validated.test("createdAfter", "Must be empty or a valid date of format yyyy-MM-dd", createdAfter, date -> {
+            if (date != null && !date.isEmpty()) {
+                try {
+                    LocalDate.parse(date);
+                } catch (Exception e) {
+                    return false;
+                }
+            }
+            return true;
+        }));
+    }
+
+    @Override
+    public TreeVisitor<?, ExecutionContext> getVisitor() {
+        TreeVisitor<?, ExecutionContext> precondition = new TreeVisitor<Tree, ExecutionContext>() {
+            final long createdAfterEpoch = createdAfter == null ? -1L : LocalDate.parse(createdAfter).atStartOfDay().toInstant(ZoneOffset.UTC).toEpochMilli();
+
+            @Override
+            public @Nullable Tree visit(@Nullable Tree tree, ExecutionContext ctx) {
+                return createdAfterEpoch == -1L || tree != null && tree.getMarkers().findFirst(BuildMetadata.class)
+                        .map(BuildMetadata::getMetadata)
+                        .map(m -> m.get("createdAt"))
+                        .map(Long::parseLong)
+                        .map(t -> t >= createdAfterEpoch)
+                        .orElse(false) ? null : tree;
+            }
+        };
+        return Preconditions.check(precondition, new TreeVisitor<Tree, ExecutionContext>() {
+
+            @Override
+            public Tree postVisit(Tree tree, ExecutionContext ctx) {
+                return tree.getMarkers().findFirst(ParseExceptionResult.class)
+                        .map(exceptionResult -> report(tree, exceptionResult, ctx))
+                        .orElse(tree.getMarkers().findFirst(DeserializationError.class)
+                                .map(error -> report(tree, error, ctx))
+                                .orElse(tree)
+                        );
+            }
+
+            private Tree report(Tree tree, DeserializationError error, ExecutionContext ctx) {
+                if (stackTrace != null && !error.getDetail().contains(stackTrace)) {
+                    return tree;
+                }
+
+                failures.insertRow(ctx, new ParseFailures.Row(
+                        "Unknown",
+                        (tree instanceof SourceFile ? (SourceFile) tree : getCursor().firstEnclosingOrThrow(SourceFile.class))
+                                .getSourcePath().toString(),
+                        "DeserializationError",
+                        null,
+                        null,
+                        error.getDetail()
+                ));
+
+                return Markup.info(tree, error.getMessage());
+            }
+
+            private Tree report(Tree tree, ParseExceptionResult exceptionResult, ExecutionContext ctx) {
+                if (parserType != null && !Objects.equals(exceptionResult.getParserType(), parserType)) {
+                    return tree;
+                } else if (stackTrace != null && !exceptionResult.getMessage().contains(stackTrace)) {
+                    return tree;
+                }
+
+                String snippet = tree instanceof SourceFile ? null : tree.printTrimmed(getCursor().getParentTreeCursor());
+                if (snippet != null && maxSnippetLength != null && snippet.length() > maxSnippetLength) {
+                    snippet = snippet.substring(0, maxSnippetLength);
+                }
+
+                failures.insertRow(ctx, new ParseFailures.Row(
+                        exceptionResult.getParserType(),
+                        (tree instanceof SourceFile ? (SourceFile) tree : getCursor().firstEnclosingOrThrow(SourceFile.class))
+                                .getSourcePath().toString(),
+                        exceptionResult.getExceptionType(),
+                        exceptionResult.getTreeType(),
+                        snippet,
+                        exceptionResult.getMessage()
+                ));
+
+                return Markup.info(tree, exceptionResult.getMessage());
+            }
+        });
+    }
+}
